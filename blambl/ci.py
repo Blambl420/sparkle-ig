@@ -13,7 +13,19 @@ from pathlib import Path
 import ipa_checks
 
 
+def channel():
+    c = os.environ.get('BUILD_CHANNEL', 'stable') or 'stable'
+    if c not in ('stable', 'beta'):
+        raise ValueError('Unknown build channel')
+    return c
+
+
+def bundle_id():
+    return 'com.blambl.sparkle.beta' if channel() == 'beta' else 'com.burbn.instagram'
+
+
 def request():
+    channel()
     for key, pattern in [('SOURCE_SHA', r'[0-9a-f]{40}'),
                          ('IG_VERSION', r'\d+\.\d+\.\d+'), ('SPARKLE_VERSION', r'\d+\.\d+\.\d+'),
                          ('TARGET_KEY', r'[0-9a-f]{24}'), ('REQUEST_ID', r'[0-9a-f]{24}')]:
@@ -32,7 +44,7 @@ def source_input():
     request()
     from ipa_checks import supported_versions
     version = os.environ['IG_VERSION']
-    if version != supported_versions(Path('main/README.md').read_text())[0]:
+    if channel() == 'stable' and version != supported_versions(Path('main/README.md').read_text())[0]:
         raise ValueError('Instagram version not the newest tested version of this release')
     if re.search(r'^Version:\s*(\S+)', Path('main/control').read_text(), re.M).group(1) != os.environ['SPARKLE_VERSION']:
         raise ValueError('Unexpected Sparkle version')
@@ -54,7 +66,7 @@ def output():
     if len(files) != 1:
         raise ValueError('Expected one release IPA')
     original = files[0]
-    info = ipa_checks.inspect(original, version, output=True)
+    info = ipa_checks.inspect(original, version, output=True, bundle_id=bundle_id())
     saved = json.loads(Path('input-info.json').read_text())
     build = os.environ['GITHUB_RUN_NUMBER'] + '.0.' + os.environ['GITHUB_RUN_ATTEMPT']
     minimum = max(saved['minimumOS'], info.get('MinimumOSVersion', '15.0'), key=lambda s: tuple(map(int, s.split('.'))))
@@ -62,9 +74,10 @@ def output():
                 'sparkleVersion': os.environ['SPARKLE_VERSION'], 'instagramVersion': version,
                 'buildVersion': build, 'originalBuild': saved['originalBuild'], 'minimumOS': minimum,
                 'inputSHA256': os.environ['IPA_SHA256'], 'profile': 'no-ext-no-flex-ffmpeg',
-                'runId': os.environ['GITHUB_RUN_ID']}
+                'runId': os.environ['GITHUB_RUN_ID'], 'channel':channel(), 'bundleIdentifier':bundle_id()}
     dist = Path('dist'); dist.mkdir(exist_ok=True)
-    result = dist / f'Sparkle_no-flex_no-ext_v{manifest["sparkleVersion"]}_IG_v{version}_build{build}.ipa'
+    prefix = 'SparkleBeta' if channel() == 'beta' else 'Sparkle'
+    result = dist / f'{prefix}_no-flex_no-ext_v{manifest["sparkleVersion"]}_IG_v{version}_build{build}.ipa'
     with zipfile.ZipFile(original) as zin:
         plist_name = next(n for n in zin.namelist() if re.fullmatch(r'Payload/[^/]+\.app/Info\.plist', n))
         root = plist_name.rsplit('/', 1)[0]
@@ -74,6 +87,9 @@ def output():
             entitlements = subprocess.check_output(['ldid', '-e', str(executable)])
             plistlib.loads(entitlements)
         info['CFBundleVersion'] = build; info['MinimumOSVersion'] = minimum
+        if channel() == 'beta':
+            info['CFBundleDisplayName'] = 'Sparkle Beta'
+            info['CFBundleName'] = 'Sparkle Beta'
         with zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
             replace = {plist_name, root + '/archived-expanded-entitlements.xcent', root + '/BlamblBuild.json'}
             for entry in zin.infolist():
@@ -83,12 +99,13 @@ def output():
             zout.writestr(plist_name, plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
             zout.writestr(root + '/archived-expanded-entitlements.xcent', entitlements)
             zout.writestr(root + '/BlamblBuild.json', json.dumps(manifest))
-    checked = ipa_checks.inspect(result, version, output=True)
+    checked = ipa_checks.inspect(result, version, output=True, bundle_id=bundle_id())
     if checked['CFBundleVersion'] != build:
         raise ValueError('Output build mismatch')
     manifest['sha256'] = ipa_checks.sha256(result)
     (dist / 'build.json').write_text(json.dumps(manifest, indent=2))
     (dist / 'notes.md').write_text(f'Sparkle {manifest["sparkleVersion"]} / Instagram {version} / build {build}.\n\n'
+        f'Channel: {channel()}. ' + ('Experimental Instagram version; runtime compatibility is not verified.\n\n' if channel() == 'beta' else '\n\n') +
         f'No extensions, no FLEX; FFmpeg included. Minimum iOS {minimum}.\n\n'
         f'Sparkle by efibalogh, GPL-3.0. Complete tweak source: https://github.com/efibalogh/sparkle-ig/tree/{manifest["sourceSHA"]}\n'
         f'Build automation: https://github.com/{os.environ["GITHUB_REPOSITORY"]}/tree/{os.environ["GITHUB_SHA"]}/blambl\n\n'

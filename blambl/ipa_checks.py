@@ -50,7 +50,7 @@ def decrypted_macho(data):
         pos += size
 
 
-def inspect(path, version=None, output=False):
+def inspect(path, version=None, output=False, bundle_id='com.burbn.instagram'):
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         plists = [n for n in names if re.fullmatch(r'Payload/[^/]+\.app/Info\.plist', n)]
@@ -58,8 +58,8 @@ def inspect(path, version=None, output=False):
             raise ValueError('Expected exactly one main app')
         p = plists[0]; root = p.rsplit('/', 1)[0] + '/'
         info = plistlib.loads(z.read(p))
-        if info.get('CFBundleIdentifier') != 'com.burbn.instagram':
-            raise ValueError('Expected com.burbn.instagram')
+        if info.get('CFBundleIdentifier') != bundle_id:
+            raise ValueError('Expected ' + bundle_id)
         if version and info.get('CFBundleShortVersionString') != version:
             raise ValueError('Unsupported Instagram version: ' + str(info.get('CFBundleShortVersionString')))
         exe = info.get('CFBundleExecutable', '')
