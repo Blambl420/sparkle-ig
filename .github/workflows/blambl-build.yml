@@ -1,0 +1,113 @@
+name: Blambl stable Sparkle
+run-name: Sparkle ${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: Temporary clean IPA URL
+        required: true
+        type: string
+      ipa_sha256:
+        description: Expected clean IPA SHA256
+        required: true
+        type: string
+      source_sha:
+        description: Immutable stable upstream commit
+        required: true
+        type: string
+      instagram_version:
+        description: Tested Instagram version
+        required: true
+        type: string
+      sparkle_version:
+        description: Stable Sparkle version
+        required: true
+        type: string
+      target_key:
+        description: Server policy fingerprint
+        required: true
+        type: string
+      request_id:
+        description: Unique request correlation ID
+        required: true
+        type: string
+concurrency:
+  group: blambl-sparkle
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      IPA_URL: ${{ inputs.ipa_url }}
+      IPA_SHA256: ${{ inputs.ipa_sha256 }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      IG_VERSION: ${{ inputs.instagram_version }}
+      SPARKLE_VERSION: ${{ inputs.sparkle_version }}
+      TARGET_KEY: ${{ inputs.target_key }}
+      REQUEST_ID: ${{ inputs.request_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: automation
+          persist-credentials: false
+      - name: Validate request
+        run: python3 automation/blambl/ci.py request
+      - uses: actions/checkout@v4
+        with:
+          repository: efibalogh/sparkle-ig
+          ref: ${{ inputs.source_sha }}
+          submodules: recursive
+          path: main
+          persist-credentials: false
+      - name: Download and validate clean IPA
+        run: python3 automation/blambl/ci.py input
+      - name: Install build tools
+        run: |
+          brew install ldid dpkg make autoconf automake cmake libtool meson nasm ninja pkgconf wget yasm
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/cyan"
+          "$RUNNER_TEMP/cyan/bin/pip" install https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+          echo "$RUNNER_TEMP/cyan/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: 405e5c6ddb288615c030eeaedc6b265aae748285
+          submodules: recursive
+          path: theos
+          persist-credentials: false
+      - uses: actions/cache@v4
+        id: sdk
+        with:
+          path: theos/sdks
+          key: blambl-ios-sdk-16.2-v1
+      - name: Prepare SDK
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs sdk-source
+          cd sdk-source
+          git sparse-checkout set --no-cone iPhoneOS16.2.sdk
+          git checkout --quiet
+          mv iPhoneOS16.2.sdk "$THEOS/sdks/"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            main/modules/ffmpegkit
+            main/.cache/ffmpegkit
+          key: blambl-ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('main/fetch-ffmpegkit.sh') }}
+      - name: Build FFmpeg frameworks
+        working-directory: main
+        run: ./fetch-ffmpegkit.sh
+      - name: Build Sparkle without extensions or FLEX
+        working-directory: main
+        run: ./build.sh ipa --release --no-ext
+      - name: Finalize and verify IPA
+        run: python3 automation/blambl/ci.py output
+      - name: Create verified draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "blambl-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" dist/*.ipa dist/build.json --repo "$GITHUB_REPOSITORY" --draft --title "Sparkle ${SPARKLE_VERSION} · Instagram ${IG_VERSION}" --notes-file dist/notes.md
