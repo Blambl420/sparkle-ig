@@ -5,11 +5,11 @@ on:
     inputs:
       ipa_url:
         description: Temporary clean IPA URL
-        required: true
+        required: false
         type: string
       ipa_sha256:
         description: Expected clean IPA SHA256
-        required: true
+        required: false
         type: string
       source_sha:
         description: Immutable stable upstream commit
@@ -31,6 +31,11 @@ on:
         description: Unique request correlation ID
         required: true
         type: string
+      verify_only:
+        description: Compile tweak and dependencies without downloading or publishing an IPA
+        required: false
+        default: false
+        type: boolean
 concurrency:
   group: blambl-sparkle
   cancel-in-progress: false
@@ -49,6 +54,7 @@ jobs:
       SPARKLE_VERSION: ${{ inputs.sparkle_version }}
       TARGET_KEY: ${{ inputs.target_key }}
       REQUEST_ID: ${{ inputs.request_id }}
+      VERIFY_ONLY: ${{ inputs.verify_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,10 +109,17 @@ jobs:
         run: ./fetch-ffmpegkit.sh
       - name: Build Sparkle without extensions or FLEX
         working-directory: main
-        run: ./build.sh ipa --release --no-ext
+        run: |
+          if [ "$VERIFY_ONLY" = "true" ]; then
+            ./build.sh ipa --release --no-ext --buildonly
+          else
+            ./build.sh ipa --release --no-ext
+          fi
       - name: Finalize and verify IPA
+        if: ${{ !inputs.verify_only }}
         run: python3 automation/blambl/ci.py output
       - name: Create verified draft release
+        if: ${{ !inputs.verify_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

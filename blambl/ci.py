@@ -14,11 +14,15 @@ import ipa_checks
 
 
 def request():
-    for key, pattern in [('SOURCE_SHA', r'[0-9a-f]{40}'), ('IPA_SHA256', r'[0-9a-f]{64}'),
+    for key, pattern in [('SOURCE_SHA', r'[0-9a-f]{40}'),
                          ('IG_VERSION', r'\d+\.\d+\.\d+'), ('SPARKLE_VERSION', r'\d+\.\d+\.\d+'),
                          ('TARGET_KEY', r'[0-9a-f]{24}'), ('REQUEST_ID', r'[0-9a-f]{24}')]:
         if not re.fullmatch(pattern, os.environ[key]):
             raise ValueError('Invalid ' + key)
+    if os.environ.get('VERIFY_ONLY') == 'true':
+        return
+    if not re.fullmatch(r'[0-9a-f]{64}', os.environ['IPA_SHA256']):
+        raise ValueError('Invalid IPA SHA256')
     if not re.fullmatch(r'https://altstore\.blambl\.cz/inbox/[0-9a-f]{32}/instagram\.ipa', os.environ['IPA_URL']):
         raise ValueError('Unexpected IPA source URL')
     print('::add-mask::' + os.environ['IPA_URL'])
@@ -32,6 +36,8 @@ def source_input():
         raise ValueError('Instagram version not the newest tested version of this release')
     if re.search(r'^Version:\s*(\S+)', Path('main/control').read_text(), re.M).group(1) != os.environ['SPARKLE_VERSION']:
         raise ValueError('Unexpected Sparkle version')
+    if os.environ.get('VERIFY_ONLY') == 'true':
+        return
     path = Path('main/packages/com.burbn.instagram.ipa'); path.parent.mkdir(exist_ok=True)
     with urllib.request.urlopen(os.environ['IPA_URL'], timeout=120) as r, path.open('wb') as f:
         shutil.copyfileobj(r, f)
