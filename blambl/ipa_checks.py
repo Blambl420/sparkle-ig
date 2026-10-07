@@ -53,7 +53,7 @@ def decrypted_macho(data):
 def extension_names(path):
     with zipfile.ZipFile(path) as z:
         return sorted({m.group(1) for n in z.namelist()
-                       for m in [re.fullmatch(r'Payload/[^/]+\.app/PlugIns/([^/]+\.appex)/Info\.plist', n)] if m})
+                       for m in [re.fullmatch(r'Payload/[^/]+\.app/(?:PlugIns|Extensions)/([^/]+\.appex)/Info\.plist', n)] if m})
 
 
 def inspect(path, version=None, output=False, bundle_id='com.burbn.instagram', with_extensions=False):

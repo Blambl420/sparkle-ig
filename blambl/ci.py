@@ -105,7 +105,7 @@ def output():
             replace = {plist_name, root + '/archived-expanded-entitlements.xcent', root + '/BlamblBuild.json'}
             for entry in zin.infolist():
                 if entry.filename not in replace:
-                    if with_extensions() and re.fullmatch(r'Payload/[^/]+\.app/PlugIns/[^/]+\.appex/Info\.plist', entry.filename):
+                    if with_extensions() and re.fullmatch(r'Payload/[^/]+\.app/(?:PlugIns|Extensions)/[^/]+\.appex/Info\.plist', entry.filename):
                         extension_info = plistlib.loads(zin.read(entry))
                         extension_info['CFBundleVersion'] = build
                         zout.writestr(entry, plistlib.dumps(extension_info, fmt=plistlib.FMT_BINARY))
