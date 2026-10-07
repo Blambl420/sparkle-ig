@@ -114,7 +114,19 @@ jobs:
       - name: Build FFmpeg frameworks
         working-directory: main
         run: ./fetch-ffmpegkit.sh
-      - name: Build Sparkle without extensions or FLEX
+      - name: Prepare upstream ipapatch for extensions
+        if: inputs.channel != 'beta'
+        working-directory: main
+        run: |
+          case "$(uname -m)" in
+            arm64) ARCH=arm64 ;;
+            x86_64) ARCH=amd64 ;;
+            *) exit 1 ;;
+          esac
+          curl --fail --location --output ipapatch "https://github.com/asdfzxcvbn/ipapatch/releases/download/v2.1.3/ipapatch.macos-${ARCH}"
+          chmod +x ipapatch
+          echo "$PWD" >> "$GITHUB_PATH"
+      - name: Build Sparkle release
         working-directory: main
         run: |
           if [ "$VERIFY_ONLY" = "true" ]; then
@@ -123,7 +135,7 @@ jobs:
             if [ "$BUILD_CHANNEL" = "beta" ]; then
               ./build.sh ipa --release --no-ext --bundle-id com.blambl.sparkle.beta
             else
-              ./build.sh ipa --release --no-ext
+              ./build.sh ipa --release
             fi
           fi
       - name: Finalize and verify IPA

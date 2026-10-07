@@ -50,7 +50,13 @@ def decrypted_macho(data):
         pos += size
 
 
-def inspect(path, version=None, output=False, bundle_id='com.burbn.instagram'):
+def extension_names(path):
+    with zipfile.ZipFile(path) as z:
+        return sorted({m.group(1) for n in z.namelist()
+                       for m in [re.fullmatch(r'Payload/[^/]+\.app/PlugIns/([^/]+\.appex)/Info\.plist', n)] if m})
+
+
+def inspect(path, version=None, output=False, bundle_id='com.burbn.instagram', with_extensions=False):
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         plists = [n for n in names if re.fullmatch(r'Payload/[^/]+\.app/Info\.plist', n)]
@@ -67,8 +73,10 @@ def inspect(path, version=None, output=False, bundle_id='com.burbn.instagram'):
             raise ValueError('Invalid main executable')
         decrypted_macho(z.read(root + exe))
         if output:
-            if any('.appex/' in n for n in names):
+            if not with_extensions and any('.appex/' in n for n in names):
                 raise ValueError('App extensions remain in no-ext build')
+            if with_extensions and not any('.appex/Info.plist' in n for n in names):
+                raise ValueError('Expected extensions in standard release build')
             for suffix in ('Frameworks/Sparkle.dylib', 'Frameworks/SPKSideloadFix.dylib'):
                 if root + suffix not in names:
                     raise ValueError('Missing ' + suffix)
